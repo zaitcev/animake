@@ -1,7 +1,9 @@
 # animake -- The Ani-Nouto Make
+# coding=utf-8
 # Copyright (c) 2014 Pete Zaitcev <zaitcev@yahoo.com>
 
 from __future__ import print_function
+from __future__ import unicode_literals
 
 import codecs
 import os
@@ -10,6 +12,132 @@ import sys
 from animake import AppError
 
 TAG="animake"
+
+# We forgot to encode this relationship in the repo, so now we have to
+# hardcode the known series.
+# XXX Make a list of known non-anime tags too, then warn if unknown tag.
+anime_known = [
+'abenobashi',
+'accel world',
+'AIURA',
+'AKB0048',
+'angel beats',
+'ano natsu',
+'arashi',
+'aria',
+'asoiku',
+'azumanga',
+'bakemonogatari',
+'bamboob',
+'bamboo blade',
+'banner',
+'black lagoon',
+'campanella',
+'chihayafuru',
+'chuu2koi',
+'dai-guard',
+'dennou coil',
+'dog days',
+'druaga',
+'dual',
+'ef',
+'fairy_tail',
+'figure17',
+'fractale',
+'FSN',
+'fullmoon',
+'ga_gadc',
+'gargantia',
+'garupan',
+'gatakei',
+'golden_time',
+'gundam',
+'gurren-lagann',
+'Haganai',
+'haibane',
+'hanamaru',
+'haruhi',
+'hidamari',
+'hyakko',
+'ichizon',
+'infinite stratos',
+'Initial D',
+'j2',
+'Joshiraku',
+'kamichu',
+'kampfer',
+'kannagi',
+'katanagatari',
+'kimikiss',
+'kobato',
+'K-ON',
+'kuragehime',
+'lagrange',
+'lucky star',
+'macademi',
+'macross',
+'madoka',
+'magikano',
+'mahoraba',
+'manabi',
+'marimite',
+'midori days',
+'mitsudomoe',
+'moribito',
+'morita-san',
+'mouretsu',
+'muromi-san',
+'mushishi',
+'muv-luv',
+'nanoha',
+'naruto',
+'natsuiro kiseki',
+'nazo no kanojo x',
+'nichijou',
+'nodame',
+'non_non_biyori',
+'Oba Nobuna',
+'oh_edo_rocket',
+'ookami-san',
+'oreimo',
+'polar bear cafe',
+'precure',
+'rahxephon',
+'railgun',
+'rocket girls',
+'seiyuu',
+'sekirei',
+'shingu',
+'shining hearts',
+'silver_spoon',
+'sops',
+'sorakake',
+'stella',
+'stellvia',
+'strike witches',
+'sunred',
+'SYD',
+'tamako_market',
+'tari tari',
+'to heart',
+'tokikake',
+'toradora',
+'true tears',
+'TWGOK',
+'uchouten_kazoku',
+'upotte',
+'vandread',
+'vividred',
+'watamote',
+'xenoglossia',
+'yakuindomo',
+'yama no susume',
+'yowapeda',
+'yuyushiki',
+'zakuro',
+'ZKC',
+'君に届け',
+'無敵看板娘']
 
 # Param
 
@@ -122,6 +250,26 @@ class Entry(object):
 
         efp.close()
 
+def all_tags_update(all_tags, tags):
+    for tag in tags:
+        if tag not in all_tags:
+            tagdict = { 'parent': None, 'count': 1 }
+            if tag in anime_known:
+                tagdict['parent'] = 'anime'
+            all_tags[tag] = tagdict
+        else:
+            tagdict = all_tags[tag]
+            tagdict['count'] += 1
+
+# XXX This prints parented tags mixed with freestanding ones.
+def all_tags_print(all_tags):
+    print("Tags:")
+    for tag in sorted(all_tags.iterkeys()):
+        tagdict = all_tags[tag]
+        print(("%s%s: %d" % (' ' if tagdict['parent'] else '',
+                           tag,
+                           tagdict['count'])).encode('utf-8'))
+
 def listerror(e):
     raise AppError("Cannot list: "+str(e))
 
@@ -153,25 +301,20 @@ def do(par):
         except ValueError:
             year = 0
         if 2000 < year <= 2100:
-            filenames.sort()
-            for name in filenames:
+            for name in sorted(filenames):
                 if name[-4:] == '.txt':
                     ent = Entry(dirpath, name)
+                    if len(ent.tags) == 0:
+                        print("Warning: No tags in %s" % ent.path,
+                              file=sys.stderr)
+                    all_tags_update(all_tags, ent.tags)
 
-                    for tag in ent.tags:
-                        if tag not in all_tags:
-                            all_tags[tag] = ""
+    all_tags_print(all_tags)
 
     for dirpath, dirnames, filenames in os.walk(par.repo, onerror=listerror):
         dirnames.sort(reverse=True)
         if par.verbose:
             print('%s' % dirpath)
-
-    # P3
-    # XXX output not sorted
-    print("Tags:")
-    for tag in all_tags:
-        print(" %s" % tag)
 
 def main(args):
     try:
