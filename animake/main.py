@@ -173,8 +173,6 @@ class Param:
         #: The output directory, no default
         self.root = None
         #: For debugging
-        # XXX verify if -d & -v are actually used
-        self.debug = False
         self.verbose = False
         for i in range(len(argv)):
             if skip:
@@ -182,9 +180,7 @@ class Param:
                 continue
             arg = argv[i]
             if len(arg) != 0 and arg[0] == '-':
-                if arg == "-d":
-                    self.debug = True
-                elif arg == "-o":
+                if arg == "-o":
                     if i+1 == len(argv):
                         raise ParamError("Parameter -o needs an argument")
                     self.root = argv[i+1]
