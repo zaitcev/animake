@@ -14,8 +14,7 @@ from animake import AppError
 TAG="animake"
 
 # We forgot to encode this relationship in the repo, so now we have to
-# hardcode the known series.
-# XXX Make a list of known non-anime tags too, then warn if unknown tag.
+# hardcode the known anime series.
 anime_known = [
 'abenobashi',
 'accel world',
@@ -139,6 +138,28 @@ anime_known = [
 '君に届け',
 '無敵看板娘']
 
+# We also hardcode all categories, so warnings may be issued.
+cat_known = [
+'anime',
+'bost',
+'ecchi',
+'game',
+'hentai',
+'manga',
+'meta',
+'micro-nouto',
+'music',
+'netflix',
+'nihongo',
+'nipponism',
+'other',
+'ren-ai',
+'retrospective',
+'space',
+'taf',
+'triptych',
+'石田燿子']
+
 # Param
 
 class ParamError(Exception):
@@ -237,8 +258,9 @@ class Entry(object):
                 elif hv[0] == 'Author':
                     self.author = hv[1]
                 else:
-                    # XXX
-                    print("%s: Unknown header `%s'" % (self.path, hv[0]))
+                    print("Warning: Unknown header `%s' in %s" %
+                              (hv[0], self.path),
+                          file=sys.stderr)
 
         self.body = ''
         while 1:
@@ -250,12 +272,18 @@ class Entry(object):
 
         efp.close()
 
-def all_tags_update(all_tags, tags):
+def all_tags_update(all_tags, tags, path):
+    if len(tags) == 0:
+        print("Warning: No tags in %s" % path, file=sys.stderr)
     for tag in tags:
         if tag not in all_tags:
-            tagdict = { 'parent': None, 'count': 1 }
             if tag in anime_known:
-                tagdict['parent'] = 'anime'
+                tagdict = { 'parent': 'anime', 'count': 1 }
+            else:
+                tagdict = { 'parent': None, 'count': 1 }
+                if not tag in cat_known:
+                    print("Warning: Unknown tag `%s' in %s" % (tag, path),
+                          file=sys.stderr)
             all_tags[tag] = tagdict
         else:
             tagdict = all_tags[tag]
@@ -304,10 +332,7 @@ def do(par):
             for name in sorted(filenames):
                 if name[-4:] == '.txt':
                     ent = Entry(dirpath, name)
-                    if len(ent.tags) == 0:
-                        print("Warning: No tags in %s" % ent.path,
-                              file=sys.stderr)
-                    all_tags_update(all_tags, ent.tags)
+                    all_tags_update(all_tags, ent.tags, ent.path)
 
     all_tags_print(all_tags)
 
