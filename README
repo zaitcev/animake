@@ -1,3 +1,4 @@
 The animake builds a static website from Ani-nouto repository.
-It does not make any animations, sorry. It's merely reministent of
-make(1), only for Ani-nouto.
+It's like make(1) for Ani-nouto.
+
+It does not make any animations, sorry.
