@@ -200,17 +200,6 @@ class Param:
 
 #
 
-class Index(object):
-    def __init__(self, outname):
-        """
-        raises: AppError in case we cannot create the output # XXX not yet
-        """
-        self.oname = outname
-        self.ofp = open(outname, 'w')
-    def close(self):
-        self.ofp.close()
-        self.ofp = None
-
 class Entry(object):
     def __init__(self, dirpath, name):
         self.path = os.path.join(dirpath, name)
@@ -268,31 +257,88 @@ class Entry(object):
 
         efp.close()
 
-def all_tags_update(all_tags, tags, path):
-    if len(tags) == 0:
-        print("Warning: No tags in %s" % path, file=sys.stderr)
-    for tag in tags:
-        if tag not in all_tags:
-            if tag in anime_known:
-                tagdict = { 'parent': 'anime', 'count': 1 }
-            else:
-                tagdict = { 'parent': None, 'count': 1 }
-                if not tag in cat_known:
-                    print("Warning: Unknown tag `%s' in %s" % (tag, path),
-                          file=sys.stderr)
-            all_tags[tag] = tagdict
-        else:
-            tagdict = all_tags[tag]
-            tagdict['count'] += 1
+class Index(object):
+    def __init__(self, par, parent, name):
+        """
+        raises: AppError in case we cannot create the output
+        """
+        self.parent = parent
+        self.name = name
 
-# XXX This prints parented tags mixed with freestanding ones.
-def all_tags_print(all_tags):
-    print("Tags:")
-    for tag in sorted(all_tags.iterkeys()):
-        tagdict = all_tags[tag]
-        print(("%s%s: %d" % (' ' if tagdict['parent'] else '',
-                           tag,
-                           tagdict['count'])).encode('utf-8'))
+        outname = os.path.join(par.root, 'category')
+        if parent:
+            outname = os.path.join(outname, parent)
+        outname = os.path.join(outname, name)
+        try:
+            os.mkdir(outname)
+        except OSError as e:
+            pass  # likely already-existing
+        outname = os.path.join(outname, 'index.html')
+        try:
+            self.ofp = open(outname, 'w')
+        except OSError as e:
+            raise AppError("Cannot create index: "+str(e))
+
+        self.oname = outname
+        self.count = 0
+
+    def inc(self):
+        self.count += 1
+
+    def close(self):
+        self.ofp.close()
+
+class Categories(object):
+    def __init__(self, par):
+        self.par = par
+        self.all_tags = dict()
+
+    def update(self, ent):
+
+        """
+        Merge ent.tags into all_tags.
+        """
+        if len(ent.tags) == 0:
+            print("Warning: No tags in %s" % ent.path, file=sys.stderr)
+        for tag in ent.tags:
+            if tag not in self.all_tags:
+                if tag in anime_known:
+                    parent = 'anime'
+                else:
+                    parent = None
+                    if not tag in cat_known:
+                        print("Warning: Unknown tag `%s' in %s" % (
+                               tag, ent.path), file=sys.stderr)
+                index = Index(self.par, parent, tag)
+                index.inc()
+                self.all_tags[tag] = index
+            else:
+                index = self.all_tags[tag]
+                index.inc()
+
+    # XXX This prints parented tags mixed with freestanding ones.
+    # XXX suddenly when moved into class these are sorted in C locale, why?
+    def printout(self):
+        print("Tags:")
+        for tag in sorted(self.all_tags.iterkeys()):
+            index = self.all_tags[tag]
+            s = "%s%s: %d" % (
+                 ' ' if index.parent else '', index.name, index.count)
+            print(s.encode('utf-8'))
+
+    def close(self):
+        for tag in self.all_tags:
+            index = self.all_tags[tag]
+            index.close()
+
+#def write_post(ent):
+#    .......
+
+#def write_index_updates(ent, all_tags):
+#    .......
+
+#def write_extras(par):
+#    .......
 
 def listerror(e):
     raise AppError("Cannot list: "+str(e))
@@ -307,8 +353,16 @@ def do(par):
         os.mkdir(par.root)
     except OSError as e:
         raise AppError("Cannot make output directory: " + str(e))
+    try:
+        os.mkdir(os.path.join(par.root, 'category'))
+    except OSError as e:
+        raise AppError("Cannot make output directory: " + str(e))
+    try:
+        os.mkdir(os.path.join(par.root, 'category', 'anime'))
+    except OSError as e:
+        raise AppError("Cannot make output directory: " + str(e))
 
-    all_tags = dict()
+    cats = Categories(par)
 
     for dirpath, dirnames, filenames in os.walk(par.repo, onerror=listerror):
         dirnames.sort()
@@ -328,14 +382,21 @@ def do(par):
             for name in sorted(filenames):
                 if name[-4:] == '.txt':
                     ent = Entry(dirpath, name)
-                    all_tags_update(all_tags, ent.tags, ent.path)
+                    cats.update(ent)
+                    #write_post(ent)
+                    #write_index_updates(ent, all_tags)
 
-    all_tags_print(all_tags)
+    if par.verbose:
+        cats.printout()
 
     for dirpath, dirnames, filenames in os.walk(par.repo, onerror=listerror):
         dirnames.sort(reverse=True)
         if par.verbose:
             print('%s' % dirpath)
+
+    # write_extras(par)  # pages and category list
+
+    cats.close()
 
 def main(args):
     try:
