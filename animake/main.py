@@ -6,10 +6,17 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import codecs
+import errno
 import os
+import string
 import sys
+import time
+import urlparse
 
+from animake import t
+from animake import safestr
 from animake import AppError
+from animake import escapeURL, escapeURLComponent
 
 TAG="animake"
 
@@ -172,6 +179,8 @@ class Param:
         self.repo = None
         #: The output directory, no default
         self.root = None
+        #: The output URL prefix, if any; defaults to empty string
+        self.url_pfx = ""
         #: For debugging
         self.verbose = False
         for i in range(len(argv)):
@@ -184,6 +193,11 @@ class Param:
                     if i+1 == len(argv):
                         raise ParamError("Parameter -o needs an argument")
                     self.root = argv[i+1]
+                    skip = 1;
+                elif arg == "-u":
+                    if i+1 == len(argv):
+                        raise ParamError("Parameter -u needs an argument")
+                    self.url_pfx = argv[i+1]
                     skip = 1;
                 elif arg == "-v":
                     self.verbose = True
@@ -200,8 +214,34 @@ class Param:
 
 #
 
+def guess_slug(subject):
+    s = subject
+    s = s.lower()
+    ## Not sure if want. Punctuation takes cere of it.
+    # s = s.replace('/', '_')
+    ## The unicode.translate does not have second argument, so we work around.
+    # s = s.translate(None, string.punctuation)
+    for c in string.punctuation:
+        s = s.replace(c, '')
+    s = s.replace(' ', '-')
+    return s
+
+def ctx_dict_create():
+    # We intend to preload something common here, but we don't have anything.
+    return dict()
+
+
 class Entry(object):
-    def __init__(self, dirpath, name):
+    def __init__(self, root, url_pfx, dirpath, name):
+        """
+        :param root: write into this directory
+        :param url_pfx: our website is rooted here
+        :param dirpath: read from :name: in this directory
+        :param name: read from this file in :dirpath:
+
+        """
+        self.oroot = root      #: output directory root
+        self.url_pfx = url_pfx #: root of URL namespace
         self.path = os.path.join(dirpath, name)
         self.unpublished = False
         self.author = "Author" #: This may confuse some, but yes, it's "Author"
@@ -226,14 +266,15 @@ class Entry(object):
                 elif hv[0] == 'DELETED':
                     self.unpublished = True
                 else:
-                    raise AppError("%s: Bad header `%s'" % (self.path, hv[0]))
+                    raise AppError("Bad header `%s' in %s" %
+                                    (hv[0], self.path))
             else:
                 if hv[0] == 'Subject':
-                    self.subject = hv[1]
+                    self.subject = hv[1].strip()
                 elif hv[0] == 'Tags':
                     self.tags = map(lambda s: s.strip(), hv[1].split(','))
                 elif hv[0] == 'URL':
-                    self.url = hv[1]
+                    self.url = hv[1].strip()
                 elif hv[0] == 'Edit':
                     # Edit: has no sense in the static website, skipping
                     pass
@@ -241,10 +282,10 @@ class Entry(object):
                     # Skipping trackbacks
                     pass
                 elif hv[0] == 'Author':
-                    self.author = hv[1]
+                    self.author = hv[1].strip()
                 else:
                     print("Warning: Unknown header `%s' in %s" %
-                              (hv[0], self.path),
+                           (hv[0], self.path),
                           file=sys.stderr)
 
         self.body = ''
@@ -256,6 +297,106 @@ class Entry(object):
         # If would be nice to verify that tags are balanced.
 
         efp.close()
+
+        if not self.subject:
+            print("Warning: Empty subject in %s" % (self.path,),
+                  file=sys.stderr)
+
+    def _split_name(self):
+        """
+        Split up the implicit filename from self.path.
+
+        :returns: A tuple (year, month, day)
+        """
+        basename = self.path.rsplit('/', 2)[-1]
+        try:
+            year = int(basename[0:4])
+        except ValueError:
+            year = 0
+        if year < 2006 or year > 2050:
+            AppError("Bad year in `%s'" % (self.path,))
+        try:
+            month = int(basename[4:6])
+        except ValueError:
+            month = 0
+        if month < 1 or month > 12:
+            AppError("Bad month in `%s'" % (self.path,))
+        try:
+            day = int(basename[6:8])
+        except ValueError:
+            day = 0
+        if day < 1 or day > 31:
+            AppError("Bad day in `%s'" % (self.path,))
+        return (year, month, day)
+
+    def _output_name(self):
+
+        if self.url:
+            # If URL was saved, we're home free.
+            opath = urlparse.urlparse(self.url).path
+            if opath[:1] == '/':
+                opath = opath[1:]
+        else:
+            # For most entries, we didn't think to save WP slugs into the repo.
+            # Therefore, we attempt to re-generate those from subjects now.
+            # It is going to fail for a few, but there's nothing we can do.
+            if self.subject:
+                slug = guess_slug(self.subject)
+            else:
+                slug = hashlib.md5(self.body).hexdigest()
+            (year, month, day) = self._split_name()
+
+            opath = "%d/%02d/%02d/%s" % (year, month, day, slug)
+        return opath
+
+    def _output_open(self, opath):
+        odirname = os.path.join(self.oroot, opath)
+        try:
+            os.makedirs(odirname)
+        except OSError as e:
+            if e.args[0] != errno.EEXIST:
+                raise AppError("Cannot create directory:"+str(e))
+        outname = os.path.join(odirname, 'index.html')
+        try:
+            ofp = open(outname, 'w')
+        except OSError as e:
+            raise AppError("Cannot create index: "+str(e))
+        return ofp
+
+    def writeout(self):
+        ctx_dict = ctx_dict_create()
+
+        opath = self._output_name()
+        if self.url_pfx:
+            url_path = "%s/%s/" % (self.url_pfx, opath)
+            cat_pfx = "%s/category" % (self.url_pfx,)
+        else:
+            url_path = "/%s/" % (opath,)
+            cat_pfx = "/category"
+
+        # We escape our own URL in case guess_slug blows up or whatnot
+        (year, month, day) = self._split_name()
+        ctx_dict.update({
+            "date": "%d-%02d-%02d" % (year, month, day),
+            "entry_url": escapeURL(url_path),
+            "title": self.subject if self.subject else "-",
+            "body": self.body,
+            "href_root": self.url_pfx if self.url_pfx else "/",
+        })
+
+        ctx_dict['entry_tags'] = []
+        if self.tags:
+            for tag in self.tags:
+                ctx_dict['entry_tags'].append(
+                    {"href_tag": '%s/%s/' % (cat_pfx, escapeURLComponent(tag)),
+                     "name_tag": tag,
+                    })
+
+        ofp = self._output_open(opath)
+        wlist = [t.t_entry.substitute(ctx_dict)]
+        for chunk in wlist:
+            ofp.write(safestr(chunk))
+        ofp.close()
 
 class Index(object):
     def __init__(self, par, parent, name):
@@ -272,7 +413,8 @@ class Index(object):
         try:
             os.mkdir(outname)
         except OSError as e:
-            pass  # likely already-existing
+            if e.args[0] != errno.EEXIST:
+                raise AppError("Cannot create directory:"+str(e))
         outname = os.path.join(outname, 'index.html')
         try:
             self.ofp = open(outname, 'w')
@@ -287,6 +429,10 @@ class Index(object):
 
     def close(self):
         self.ofp.close()
+
+    def writeout(self, ent):
+        # XXX implement
+        pass
 
 class Categories(object):
     def __init__(self, par):
@@ -315,6 +461,7 @@ class Categories(object):
             else:
                 index = self.all_tags[tag]
                 index.inc()
+            index.writeout(ent)
 
     # XXX This prints parented tags mixed with freestanding ones.
     # XXX suddenly when moved into class these are sorted in C locale, why?
@@ -331,14 +478,13 @@ class Categories(object):
             index = self.all_tags[tag]
             index.close()
 
-#def write_post(ent):
-#    .......
-
-#def write_index_updates(ent, all_tags):
-#    .......
-
-#def write_extras(par):
-#    .......
+    def writeout(self):
+        """
+        Creates the index.html for category/. Creates pages, if any.
+        Note that anime/ should have its own (gigantic) index made of posts.
+        """
+        # XXX implement
+        pass
 
 def listerror(e):
     raise AppError("Cannot list: "+str(e))
@@ -381,10 +527,9 @@ def do(par):
         if 2000 < year <= 2100:
             for name in sorted(filenames):
                 if name[-4:] == '.txt':
-                    ent = Entry(dirpath, name)
+                    ent = Entry(par.root, par.url_pfx, dirpath, name)
                     cats.update(ent)
-                    #write_post(ent)
-                    #write_index_updates(ent, all_tags)
+                    ent.writeout()
 
     if par.verbose:
         cats.printout()
@@ -394,9 +539,8 @@ def do(par):
         if par.verbose:
             print('%s' % dirpath)
 
-    # write_extras(par)  # pages and category list
-
     cats.close()
+    cats.writeout()
 
 def main(args):
     try:
