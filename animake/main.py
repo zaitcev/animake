@@ -208,9 +208,9 @@ class Param:
                     raise ParamError("Redundant repository parameter")
                 self.repo = arg
         if self.repo == None:
-            raise ParamError("No mandatory repository parameter")
+            raise ParamError("Missing mandatory repository parameter")
         if self.root == None:
-            raise ParamError("No mandatory output directory parameter")
+            raise ParamError("Missing mandatory output directory parameter -o")
 
 #
 
@@ -398,6 +398,7 @@ class Entry(object):
             ofp.write(safestr(chunk))
         ofp.close()
 
+
 class Index(object):
     def __init__(self, par, parent, name):
         """
@@ -433,6 +434,7 @@ class Index(object):
     def writeout(self, ent):
         # XXX implement
         pass
+
 
 class Categories(object):
     def __init__(self, par):
@@ -547,7 +549,7 @@ def main(args):
         par = Param(args)
     except ParamError as e:
         print(TAG+": Error in arguments:", e, file=sys.stderr)
-        print("Usage:", TAG+" [-d] [-v] -o /out/dir /path/to/repo",
+        print("Usage:", TAG+" [-d] [-v] [-u URLpfx] -o /out/dir /path/to/repo",
               file=sys.stderr)
         return 1
 
